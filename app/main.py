@@ -1,5 +1,4 @@
 from app.auth.routes import jwt_auth
-from app.config import settings
 from app.limiter import limiter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

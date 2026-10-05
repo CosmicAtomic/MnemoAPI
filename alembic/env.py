@@ -7,7 +7,7 @@ from alembic import context
 
 from app.database import Base
 from app.config import settings
-from app.models import User
+from app.models.user import User
 # If you create a notes model later, import it here too, e.g.:
 # from app.models import Note 
 # -----------------------------------
