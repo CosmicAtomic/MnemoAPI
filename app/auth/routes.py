@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 jwt_auth = APIRouter(
-    prefix='/jwt',
+    prefix='/auth',
     responses={
         401: COMMON_RESPONSES[401],
         400: COMMON_RESPONSES[400],

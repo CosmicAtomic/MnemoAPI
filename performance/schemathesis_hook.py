@@ -20,12 +20,12 @@ def get_cached_auth():
     global AUTH_DATA
     if not AUTH_DATA:
         requests.post(
-            "http://localhost:8000/jwt/signup",
+            "http://localhost:8000/auth/signup",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
         )
         
         jwt_resp = requests.post(
-            "http://localhost:8000/jwt/login",
+            "http://localhost:8000/auth/login",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
         )
         token = jwt_resp.json().get("access_token")
@@ -52,7 +52,7 @@ def before_call(ctx, case, kwargs):
         case.headers = {}
 
     # Check the path of the specific endpoint being tested
-    if "/jwt/" in case.path:
+    if "/auth/" in case.path:
         case.headers["Authorization"] = auth["jwt"]
         
     elif "/session/" in case.path:

@@ -13,7 +13,7 @@ async def test_root(client):
 
 @pytest.mark.asyncio
 async def test_signup_success(client):
-    response = await client.post('/jwt/signup', json= {
+    response = await client.post('/auth/signup', json= {
         "email": "test@example.com",
         "password": "supersecret123"
     })
@@ -25,6 +25,6 @@ async def test_signup_success(client):
 @pytest.mark.asyncio
 async def test_duplicate_email_rejected(client):
     payload = {"email": "user1@example.com", "password": "supersecret123"}
-    await client.post('/jwt/signup', json=payload)
-    response = await client.post('/jwt/signup', json=payload)
+    await client.post('/auth/signup', json=payload)
+    response = await client.post('/auth/signup', json=payload)
     assert response.status_code == 400
