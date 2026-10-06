@@ -1,6 +1,7 @@
 import uuid
 from app.database import Base
 from sqlalchemy import Column, UUID, String
+from sqlalchemy.orm import relationship
 
 class User(Base):
     __tablename__ = "users"
@@ -10,3 +11,5 @@ class User(Base):
     github_id = Column(String, nullable= True, index= True, unique= True)
     username = Column(String, nullable = True)
     google_id = Column(String, nullable= True, unique= True)
+
+    notes = relationship("Note", back_populates="author", passive_deletes=True)
