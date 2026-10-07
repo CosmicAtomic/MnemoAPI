@@ -1,4 +1,5 @@
 from app.models.note import Note
+from app.models.tag import Tag
 from app.models.user import User
 from fastapi import  HTTPException, status
 from sqlalchemy.orm import Session
@@ -24,3 +25,11 @@ def get_note_or_404(db:Session, note_id: UUID, user_id: UUID):
     if not note or note.author_id != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
     return note
+
+def get_or_create_tags(db: Session, names: list[str]):
+    if not names:
+        return []
+    existing = db.query(Tag).filter(Tag.name.in_(names)).all()
+    existing_names = {tag.name for tag in existing}
+    new_tags = [Tag(name=n) for n in names if n not in existing_names]
+    return existing + new_tags

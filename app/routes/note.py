@@ -1,7 +1,7 @@
 from app.dependencies import get_current_user, get_db
 from app.models.note import Note
 from app.schemas.note import NoteCreate, NoteResponse, NoteUpdate, NotesResponse
-from app.services import get_note_or_404
+from app.services import get_note_or_404, get_or_create_tags
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -13,7 +13,8 @@ def create_note(payload: NoteCreate, db: Session = Depends(get_db), current_user
     new_note = Note(
         title = payload.title,
         body = payload.body,
-        author_id = current_user.id
+        author_id = current_user.id,
+        tags= get_or_create_tags(db, payload.tags)
     )
     db.add(new_note)
     db.commit()
@@ -39,10 +40,13 @@ def get_your_notes(db: Session=Depends(get_db), current_user = Depends(get_curre
 def update_note(payload: NoteUpdate, note_id: UUID, db: Session= Depends(get_db), current_user = Depends(get_current_user)):
     note = get_note_or_404(db, note_id= note_id, user_id=current_user.id)
     update_data = payload.model_dump(exclude_unset=True)
-    if not update_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail = "No fields t0 update")
+    tag_names = update_data.pop("tags", None)
+    if not update_data and tag_names is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail = "No fields to update")
     for key, value in update_data.items():
         setattr(note, key, value)
+    if tag_names is not None:
+        note.tags = get_or_create_tags(db, tag_names)
     db.commit()
     db.refresh(note)
     return note
