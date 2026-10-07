@@ -1,5 +1,6 @@
 from app.auth.routes import jwt_auth
 from app.limiter import limiter
+from app.models import User, Note, Tag, note_tags 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
