@@ -1,7 +1,7 @@
 from app.dependencies import get_current_user, get_db
 from app.models.note import Note
 from app.schemas.note import NoteCreate, NoteResponse, NoteUpdate, NotesResponse
-from app.services import get_note_by_id
+from app.services import get_note_or_404
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -22,11 +22,7 @@ def create_note(payload: NoteCreate, db: Session = Depends(get_db), current_user
 
 @note_router.get('/{note_id}', response_model=NoteResponse, status_code=status.HTTP_200_OK)
 def get_note(note_id: UUID, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    note = get_note_by_id(db, note_id)
-    if not note:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note does not exist")
-    if note.author_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access this note.")
+    note = get_note_or_404(db, note_id= note_id, user_id=current_user.id)
     return note
 
 @note_router.get('', response_model=NotesResponse, status_code=status.HTTP_200_OK)
@@ -41,11 +37,7 @@ def get_your_notes(db: Session=Depends(get_db), current_user = Depends(get_curre
 
 @note_router.patch('/{note_id}', response_model=NoteResponse)
 def update_note(payload: NoteUpdate, note_id: UUID, db: Session= Depends(get_db), current_user = Depends(get_current_user)):
-    note = get_note_by_id(db, note_id)
-    if not note:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note does not exist")
-    if note.author_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access this note.")
+    note = get_note_or_404(db, note_id= note_id, user_id=current_user.id)
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail = "No fields t0 update")
@@ -57,10 +49,6 @@ def update_note(payload: NoteUpdate, note_id: UUID, db: Session= Depends(get_db)
 
 @note_router.delete('/{note_id}', status_code=status.HTTP_204_NO_CONTENT)
 def delete_note(note_id: UUID, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    note = get_note_by_id(db, note_id)
-    if not note:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note does not exist")
-    if note.author_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access this note.")
+    note = get_note_or_404(db, note_id= note_id, user_id=current_user.id)
     db.delete(note)
     db.commit()
