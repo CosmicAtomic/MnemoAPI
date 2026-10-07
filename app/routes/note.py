@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-note_router = APIRouter(prefix="/notes")
+note_router = APIRouter(prefix="/notes", tags=["Notes"])
 
 @note_router.post('', response_model=NoteResponse, status_code=status.HTTP_201_CREATED)
 def create_note(payload: NoteCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
