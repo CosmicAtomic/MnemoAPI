@@ -39,7 +39,7 @@ def get_your_notes(db: Session=Depends(get_db), current_user = Depends(get_curre
         "notes": notes
     }
 
-@note_router.put('/{note_id}', response_model=NoteResponse)
+@note_router.patch('/{note_id}', response_model=NoteResponse)
 def update_note(payload: NoteUpdate, note_id: UUID, db: Session= Depends(get_db), current_user = Depends(get_current_user)):
     note = get_note_by_id(db, note_id)
     if not note:
@@ -47,9 +47,10 @@ def update_note(payload: NoteUpdate, note_id: UUID, db: Session= Depends(get_db)
     if note.author_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access this note.")
     update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail = "No fields t0 update")
     for key, value in update_data.items():
-        if value != "": 
-            setattr(note, key, value)
+        setattr(note, key, value)
     db.commit()
     db.refresh(note)
     return note
