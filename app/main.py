@@ -1,6 +1,7 @@
 from app.auth.routes import jwt_auth
 from app.limiter import limiter
 from app.models import User, Note, Tag, note_tags 
+from app.routes.note import note_router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -21,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(jwt_auth)
+app.include_router(note_router)
 
 @app.get("/health")
 def health_test():

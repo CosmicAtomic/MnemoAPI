@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, date
+from pydantic import BaseModel
 
 class NoteCreate(BaseModel):
     title: str
@@ -17,3 +17,7 @@ class NoteResponse(BaseModel):
     author_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+class NotesResponse(BaseModel):
+    count: int
+    notes: list[NoteResponse]
