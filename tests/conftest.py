@@ -24,6 +24,11 @@ async def registered_user(client):
     await client.post('/auth/signup', json=payload)
     return payload
 
+@pytest.fixture
+async def auth_headers(client, registered_user):
+    response = await client.post('auth/login', json=registered_user)
+    return {"Authorization": f"Bearer {response.json()["access_token"]}"}
+
 @pytest.fixture(autouse=True)
 def reset_rate_limiter(request):
     """Resets the slowapi rate limiter memory after every test."""
