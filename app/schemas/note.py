@@ -31,6 +31,20 @@ class NoteCreate(BaseModel):
     def clean_tags(cls, v):
         return normalize_tags(v)
 
+    @field_validator("title", "body", mode="before")
+    @classmethod
+    def remove_null_bytes_from_strings(cls, v):
+        if isinstance(v, str):
+            return v.replace("\x00", "")
+        return v
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def remove_null_bytes_from_tags(cls, v):
+        if isinstance(v, list):
+            return [tag.replace("\x00", "") for tag in v if isinstance(tag, str)]
+        return v
+
 class NoteUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1)
     body: str | None = Field(default=None, min_length=1)
