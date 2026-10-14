@@ -8,54 +8,30 @@ import uuid
 # export SCHEMATHESIS_HOOKS="performance/schemathesis_hook.py"
 
 # schemathesis run http://localhost:8000/openapi.json \
-#   --exclude-path="/session/logout" \
 #   --checks=not_a_server_error,response_schema_conformance
 # ==============================================================================
 
 TEST_EMAIL = f"schemathesis_{uuid.uuid4().hex[:8]}@example.com"
 TEST_PASSWORD = "Password123!"
-AUTH_DATA = {}
+AUTH_DATA = {}  
+BASE = "http://localhost:8000"
+PUBLIC_PATHS = {"/auth/signup", "/auth/login"}
 
 def get_cached_auth():
     global AUTH_DATA
     if not AUTH_DATA:
-        requests.post(
-            "http://localhost:8000/auth/signup",
-            json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
-        )
-        
-        jwt_resp = requests.post(
-            "http://localhost:8000/auth/login",
-            json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
-        )
-        token = jwt_resp.json().get("access_token")
-
-        session_resp = requests.post(
-            "http://localhost:8000/session/login",
-            json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
-        )
-        session_id = session_resp.cookies.get("session_id")
-        csrf_token = session_resp.cookies.get("csrfToken")
-
-        AUTH_DATA = {
-            "jwt": f"Bearer {token}",
-            "session_id": session_id,
-            "csrf_token": csrf_token
-        }
+        requests.post(f"{BASE}/auth/signup",
+                      json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+        resp = requests.post(f"{BASE}/auth/login",
+                             json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+        assert resp.status_code == 200, resp.text   # fail loudly, not as a wall of 401s
+        AUTH_DATA = {"jwt": f"Bearer {resp.json()['access_token']}"}
     return AUTH_DATA
 
 @schemathesis.hook
 def before_call(ctx, case, kwargs):
-    auth = get_cached_auth()
-    
+    if case.path in PUBLIC_PATHS:
+        return
     if case.headers is None:
         case.headers = {}
-
-    # Check the path of the specific endpoint being tested
-    if "/auth/" in case.path:
-        case.headers["Authorization"] = auth["jwt"]
-        
-    elif "/session/" in case.path:
-        case.headers["Cookie"] = f"session_id={auth['session_id']}; csrfToken={auth['csrf_token']}"
-        if case.method.upper() == "POST":
-            case.headers["X-CSRF-Token"] = auth["csrf_token"]
+    case.headers["Authorization"] = get_cached_auth()["jwt"]
