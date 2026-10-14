@@ -62,5 +62,8 @@ class NoteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class NotesResponse(BaseModel):
-    count: int
+    page: int
+    limit: int
+    total_notes: int
+    total_pages: int
     notes: list[NoteResponse]

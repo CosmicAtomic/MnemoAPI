@@ -1,3 +1,4 @@
+import math
 from app.dependencies import get_current_user, get_db
 from app.models.note import Note
 from app.schemas.note import NoteCreate, NoteResponse, NoteUpdate, NotesResponse
@@ -27,12 +28,34 @@ def get_note(note_id: UUID, db: Session = Depends(get_db), current_user = Depend
     return note
 
 @note_router.get('', response_model=NotesResponse, status_code=status.HTTP_200_OK)
-def get_your_notes(db: Session=Depends(get_db), current_user = Depends(get_current_user)):
+def get_your_notes(
+    limit: int | None = 10, 
+    page: int | None = 1, 
+    db: Session=Depends(get_db), 
+    current_user = Depends(get_current_user)
+):
+    if page > 1000000:
+        page = 1000000
+    
+    limit, page = max(limit, 1), max(page, 1)
+    limit = min(limit, 100)
+
+    #-------Filter posts by author_id-------
     query = db.query(Note).filter(Note.author_id == current_user.id)
+
+    #----- Get Post count-----
     total_notes = query.count()
-    notes = query.all()
+    total_pages = math.ceil(total_notes/limit) if total_notes >0 else 1
+
+    #-----Apply pagination-----
+    offset = (page- 1) * limit
+    notes = query.offset(offset).limit(limit).all()
+    
     return {
-        "count": total_notes,
+        "page": page,
+        "limit": limit,
+        "total_notes": total_notes,
+        "total_pages": total_pages,
         "notes": notes
     }
 
