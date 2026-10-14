@@ -1,7 +1,7 @@
 import uuid
 from app.database import Base
 from app.models.association import note_tags
-from sqlalchemy import Column, DateTime, ForeignKey, func, String, UUID
+from sqlalchemy import Column, DateTime, ForeignKey, func, Index, String, UUID
 from sqlalchemy.orm import relationship
 
 class Note(Base):
@@ -12,6 +12,11 @@ class Note(Base):
     author_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable= False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default= func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default= func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_notes_author_created', 'author_id', created_at.desc()),
+        Index('idx_notes_author_updated', 'author_id', updated_at.desc()),
+    )
 
     author = relationship("User", back_populates="notes")
     tags = relationship("Tag", back_populates="notes", passive_deletes=True, secondary=note_tags)
