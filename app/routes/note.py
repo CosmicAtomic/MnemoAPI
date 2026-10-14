@@ -4,7 +4,9 @@ from app.models.note import Note
 from app.schemas.note import NoteCreate, NoteResponse, NoteUpdate, NotesResponse
 from app.services import get_note_or_404, get_or_create_tags
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import asc, desc
 from sqlalchemy.orm import Session
+from typing import Literal
 from uuid import UUID
 
 note_router = APIRouter(prefix="/notes", tags=["Notes"])
@@ -29,16 +31,16 @@ def get_note(note_id: UUID, db: Session = Depends(get_db), current_user = Depend
 
 @note_router.get('', response_model=NotesResponse, status_code=status.HTTP_200_OK)
 def get_your_notes(
-    limit: int | None = 10, 
-    page: int | None = 1, 
+    limit: int = 10, 
+    page: int = 1, 
+    sort_by : Literal["created_at", "updated_at"] = "created_at",
+    order : Literal["asc", "desc"] = "desc",  
     db: Session=Depends(get_db), 
     current_user = Depends(get_current_user)
 ):
-    if page > 1000000:
-        page = 1000000
     
-    limit, page = max(limit, 1), max(page, 1)
-    limit = min(limit, 100)
+    limit = max(1, min(limit, 100))
+    page = max(1, min(page, 1000000))
 
     #-------Filter posts by author_id-------
     query = db.query(Note).filter(Note.author_id == current_user.id)
@@ -47,10 +49,15 @@ def get_your_notes(
     total_notes = query.count()
     total_pages = math.ceil(total_notes/limit) if total_notes >0 else 1
 
+    #----- Apply Sorting------
+    sort_fn = asc if order == "asc" else desc
+    column_attr = getattr(Note, sort_by, Note.created_at)
+    query = query.order_by(sort_fn(column_attr))
+    
     #-----Apply pagination-----
     offset = (page- 1) * limit
     notes = query.offset(offset).limit(limit).all()
-    
+
     return {
         "page": page,
         "limit": limit,
