@@ -5,7 +5,7 @@ from app.schemas.note import NoteCreate, NoteResponse, NoteUpdate, NotesResponse
 from app.services import get_note_or_404, get_or_create_tags
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import asc, desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import selectinload, Session
 from typing import Literal
 from uuid import UUID
 
@@ -56,7 +56,8 @@ def get_your_notes(
     
     #-----Apply pagination-----
     offset = (page- 1) * limit
-    notes = query.offset(offset).limit(limit).all()
+    notes = query.offset(offset).limit(limit)
+    notes = notes.options(selectinload(Note.tags)).all() # -- N + 1 query problem resolution
 
     return {
         "page": page,
