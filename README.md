@@ -1,6 +1,11 @@
 # MnemoAPI
 
 ## Performance
-Composite indexes on `(author_id, created_at)` and `(author_id, updated_at)` cut
-the "list my notes" query from about 4.8 ms to about 0.8 ms on a 20,000-note
-dataset. Details: [performance/INDEXING.md](performance/INDEXING.md)
+- Composite indexes on `(author_id, created_at)` and `(author_id, updated_at)`
+  cut the "list my notes" query from about 4.8 ms to about 0.8 ms on a
+  20,000-note dataset.
+- Switching tag loading from lazy to `selectinload` removed an N+1 pattern:
+  13 queries down to 4 for a 10-note page, with a constant count as page size
+  grows.
+
+Details and caveats: [performance/PERFORMANCE.md](performance/PERFORMANCE.md)
