@@ -1,8 +1,9 @@
 # MnemoAPI: Performance Notes
 
-Query-level performance work on the "list my notes" endpoint. All measurements
-use PostgreSQL with a seeded dataset of 20,000 notes across 200 users (about
-100 notes per user), on a local development machine.
+Query-level performance work, connection-pooling behavior, and transaction
+isolation observations. Measurements use PostgreSQL with a seeded dataset of
+20,000 notes across 200 users (about 100 notes per user), on a local
+development machine.
 
 ---
 
@@ -123,3 +124,148 @@ note's author), and `selectinload` fits collections.
   assert the count is identical at 10 and at 100 notes.
 - Option considered: `lazy="raise"` on `Note.tags`, so any code path that
   forgets to eager-load fails loudly instead of silently running N+1.
+
+---
+
+## 3. Connection Pooling
+
+### Setup
+Temporarily configured the SQLAlchemy engine with a single pooled connection,
+no overflow connections, and a three-second checkout timeout:
+
+```python
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=1,
+    max_overflow=0,
+    pool_timeout=3,
+)
+```
+
+The `/auth/me` route was also temporarily changed to sleep after
+`get_current_user` completed:
+
+```python
+@jwt_auth.get("/me", response_model=UserResponse)
+def get_me(current_user=Depends(get_current_user)):
+    time.sleep(20)
+    return current_user
+```
+
+This placement matters because `get_current_user` has already executed a
+database query by the time `get_me` starts sleeping.
+
+### Request and connection lifetime
+The `get_db` dependency creates a SQLAlchemy session and closes it in its
+`finally` block:
+
+```python
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
+
+The session checks out a connection when `get_current_user` performs its user
+query. FastAPI keeps the dependency context alive until the request finishes,
+so the connection remains checked out while `get_me` sleeps. It is returned to
+the pool only after the endpoint returns and `get_db` closes the session.
+
+### Results
+Two concurrent `/auth/me` requests were sent to a single-worker server with
+the temporary pool configuration.
+
+| Request | Result |
+|---------|--------|
+| Request that acquired the connection | HTTP 200 after about 22 seconds |
+| Competing request | HTTP 500 after about 3 seconds |
+
+The server log reported:
+
+```text
+sqlalchemy.exc.TimeoutError:
+QueuePool limit of size 1 overflow 0 reached,
+connection timed out, timeout 3.00
+```
+
+The result confirms that the second request cannot obtain a connection while
+the first request holds the only pooled connection during its sleep.
+
+### Takeaways
+- A SQLAlchemy `Session` is created before a connection is necessarily
+  checked out, but the first database query checks out a connection.
+- A dependency-held session can retain that connection until the entire
+  request completes, including time spent doing non-database work.
+- With `pool_size=1` and `max_overflow=0`, concurrent requests are limited to
+  one active database connection.
+- `pool_timeout` controls how long a request waits for a connection. It does
+  not limit endpoint duration or interrupt a request that already owns a
+  connection.
+- Slow endpoints, sleeps, external calls, or other blocking work after a
+  database query can exhaust a small pool and cause `QueuePool` timeouts.
+
+### Limitations
+- The reproduction used one server worker. Each worker creates its own engine
+  and pool, so multiple workers increase the total number of connections and
+  can change contention behavior.
+- The test used two concurrent requests and a deliberately small pool; the
+  timing demonstrates pool behavior but is not a production capacity
+  benchmark.
+
+---
+
+## 4. Transaction Isolation
+
+### Setup
+Used two PostgreSQL sessions, A and B, to update and read the same seeded
+value under different isolation levels. Session B changed the value to
+`CHANGED BY B` and then either held or committed its transaction while session
+A repeated the read.
+
+The application remains on PostgreSQL's default `READ COMMITTED` isolation
+level.
+
+### Results
+
+| Scenario | What session A saw |
+|----------|--------------------|
+| `READ COMMITTED`, B updated but had not committed | Original value (`seed 0`) |
+| `READ COMMITTED`, B committed | New value (`CHANGED BY B`) |
+| `REPEATABLE READ`, B committed | Original value until A finished its transaction |
+
+### Dirty reads
+Dirty reads did not occur. Session A never saw session B's uncommitted
+change. PostgreSQL accepts `READ UNCOMMITTED`, but implements it with the same
+behavior as `READ COMMITTED`, so uncommitted changes remain invisible.
+
+### Non-repeatable reads
+At `READ COMMITTED`, each statement obtains a current snapshot. Therefore, the
+same `SELECT` can return different values within one transaction:
+
+1. Session A reads the original value.
+2. Session B updates the value and commits.
+3. Session A repeats the same `SELECT`.
+4. Session A sees `CHANGED BY B`.
+
+This is a non-repeatable read.
+
+### Prevention with `REPEATABLE READ`
+At `REPEATABLE READ`, session A retains the transaction snapshot it established
+at the beginning of its transaction. Even after session B commits, A continues
+to see the original value until its transaction ends.
+
+### Takeaways
+- PostgreSQL's default `READ COMMITTED` prevents dirty reads.
+- `READ COMMITTED` allows a later statement in the same transaction to see
+  commits that occurred after an earlier statement.
+- `REPEATABLE READ` provides a stable transaction-wide snapshot and prevents
+  the observed non-repeatable read.
+- `READ UNCOMMITTED` does not provide weaker dirty-read behavior in
+  PostgreSQL; it behaves as `READ COMMITTED`.
+- `READ COMMITTED` is sufficient for this application because requests use
+  short transactions and do not currently require a stable snapshot across
+  multiple statements.
+- Moving to `REPEATABLE READ` would introduce additional retry handling for
+  serialization failures and is not needed for the current request pattern.
