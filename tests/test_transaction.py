@@ -18,7 +18,6 @@ async def test_create_note_rolls_back_everything_on_failure(client, auth_headers
 
     links_before = db_session.execute(select(func.count()).select_from(note_tags)).scalar()
 
-      # 1. FIX: Tell pytest to expect the deliberate crash here
     with pytest.raises(RuntimeError, match="deliberate failure"):
         await client.post(
             "/notes",
