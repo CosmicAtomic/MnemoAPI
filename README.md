@@ -1,16 +1,349 @@
 # MnemoAPI
 
-## Performance
-- Composite indexes on `(author_id, created_at)` and `(author_id, updated_at)`
-  cut the "list my notes" query from about 4.8 ms to about 0.8 ms on a
-  20,000-note dataset.
-- Switching tag loading from lazy to `selectinload` removed an N+1 pattern:
-  13 queries down to 4 for a 10-note page, with a constant count as page size
-  grows.
-- A single-connection pool with no overflow caused a competing `/auth/me`
-  request to fail after the three-second checkout timeout while the first
-  request slept for 20 seconds.
-- PostgreSQL `READ COMMITTED` prevented dirty reads but allowed a
-  non-repeatable read; `REPEATABLE READ` preserved the original snapshot.
+MnemoAPI is a FastAPI service for authenticated personal notes. It provides
+JWT-based authentication, CRUD operations for notes, normalized tags, paging
+and sorting, PostgreSQL persistence through SQLAlchemy, and Alembic-managed
+schema migrations.
 
-Details and caveats: [performance/PERFORMANCE.md](performance/PERFORMANCE.md)
+## Features
+
+- User signup and login with Argon2 password hashing.
+- JWT bearer authentication for protected endpoints.
+- Create, read, update, and delete notes.
+- Many-to-many note/tag relationships.
+- Tag normalization: trimming, lowercasing, deduplication, and a 50-character
+  limit.
+- Pagination and sorting for a user's notes.
+- Login rate limiting: five requests per minute per client address.
+- PostgreSQL database support through SQLAlchemy and Psycopg.
+- Alembic migrations for the database schema.
+- Eager tag loading with `selectinload` to avoid an N+1 query pattern.
+- Composite indexes for filtering and sorting notes by author and date.
+- Pytest coverage for health checks, signup, authentication, rate limiting,
+  transaction rollback, and query-count behavior.
+- Schemathesis hook for authenticated OpenAPI-based contract testing.
+
+## Technology
+
+- Python
+- FastAPI
+- Pydantic v2 and `pydantic-settings`
+- SQLAlchemy 2
+- Psycopg 3
+- PostgreSQL
+- Alembic
+- PyJWT
+- `pwdlib` with Argon2
+- SlowAPI
+- Pytest and `pytest-asyncio`
+- Schemathesis
+
+## Project layout
+
+```text
+app/
+  auth/routes.py       Signup, login, and current-user endpoints
+  models/              SQLAlchemy models and note/tag association table
+  routes/note.py       Note CRUD and list endpoint
+  schemas/             Pydantic request and response models
+  config.py            Environment-backed application settings
+  database.py          SQLAlchemy engine, session factory, and declarative base
+  dependencies.py      Database-session and current-user dependencies
+  security.py          Password hashing and JWT helpers
+  services.py          Database lookup and tag helper functions
+  limiter.py           SlowAPI limiter configuration
+  main.py              FastAPI application assembly
+alembic/
+  env.py               Migration environment
+  versions/            Database migration history
+performance/
+  PERFORMANCE.md       Detailed measurements and database behavior notes
+  schemathesis_hook.py Authenticated Schemathesis hook
+scripts/
+  seed.py              Performance-data seeding script
+tests/
+  conftest.py          Test client, SQLite database, and dependency overrides
+  test_*.py            Focused application tests
+```
+
+## Requirements
+
+- Python 3.14 or a compatible modern Python version
+- PostgreSQL for application development and performance experiments
+- A virtual environment is recommended
+
+Install the pinned dependencies with:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+On macOS or Linux, activate the environment with:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+## Configuration
+
+Create a local `.env` file in the repository root. It is ignored by Git and
+must not be committed.
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/mnemoapi
+JWT_SECRET_KEY=replace-with-a-long-random-secret
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+`DATABASE_URL` and `JWT_SECRET_KEY` are required. `ALGORITHM` defaults to
+`HS256`, and access tokens default to a 30-minute lifetime.
+
+The application reads configuration through
+[`app/config.py`](app/config.py). The Alembic environment also reads
+`DATABASE_URL` from the application settings, so the same database
+configuration is used for migrations and runtime queries.
+
+## Database setup
+
+Apply all migrations to the configured database:
+
+```powershell
+alembic upgrade head
+```
+
+The migration history creates:
+
+- `users`
+- `notes`
+- `tags`
+- `note_tags`
+- Composite note indexes on `(author_id, created_at DESC)` and
+  `(author_id, updated_at DESC)`
+
+Create a new migration after changing SQLAlchemy models with:
+
+```powershell
+alembic revision --autogenerate -m "describe the schema change"
+alembic upgrade head
+```
+
+Review autogenerated migrations before applying them to a shared database.
+
+## Seed data
+
+The optional seed script creates performance data:
+
+- 200 users
+- 100 notes per user
+- 20 reusable tags
+- 20,000 notes in total
+
+Run it only against a database that is safe to modify:
+
+```powershell
+python scripts/seed.py
+```
+
+The script is intended for performance experiments. Its seeded password value
+is a placeholder rather than a valid password hash, so seeded users should not
+be treated as normal login fixtures.
+
+## Running the API
+
+Start the development server from the repository root:
+
+```powershell
+uvicorn app.main:app --reload
+```
+
+The API is available at `http://localhost:8000`.
+
+FastAPI exposes interactive documentation at:
+
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- OpenAPI document: `http://localhost:8000/openapi.json`
+
+## API endpoints
+
+### Health
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | No | Returns an application-health message |
+
+### Authentication
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/auth/signup` | No | Creates a user and returns its public profile |
+| `POST` | `/auth/login` | No | Validates credentials and returns a JWT |
+| `GET` | `/auth/me` | Bearer JWT | Returns the authenticated user's public profile |
+
+Signup and login accept:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "a-strong-password"
+}
+```
+
+Login returns a token response:
+
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "bearer"
+}
+```
+
+Use the token on protected requests:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+Login is limited to five requests per minute per client address. Exceeding
+that limit returns HTTP 429.
+
+### Notes
+
+All note endpoints require a bearer token. A user can access only notes that
+they own.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/notes` | Creates a note |
+| `GET` | `/notes` | Lists the authenticated user's notes |
+| `GET` | `/notes/{note_id}` | Returns one owned note |
+| `PATCH` | `/notes/{note_id}` | Updates one owned note |
+| `DELETE` | `/notes/{note_id}` | Deletes one owned note |
+
+Create-note example:
+
+```json
+{
+  "title": "First note",
+  "body": "Remember to review the migration.",
+  "tags": ["Work", "database", "work"]
+}
+```
+
+Tags are returned as `["work", "database"]` after trimming, lowercasing, and
+deduplication. Empty tag names are ignored. Sending `[]` removes all tags
+during an update; sending `null` for `tags` is rejected.
+
+The note list endpoint supports:
+
+| Query parameter | Default | Behavior |
+|---|---:|---|
+| `limit` | `10` | Clamped to 1 through 100 |
+| `page` | `1` | Clamped to 1 through 1,000,000 |
+| `sort_by` | `created_at` | `created_at` or `updated_at` |
+| `order` | `desc` | `asc` or `desc` |
+
+Example:
+
+```text
+GET /notes?limit=20&page=2&sort_by=updated_at&order=desc
+```
+
+The response contains the requested page, page size, total note count, total
+page count, and the note records with their tags.
+
+## Data model
+
+- A `User` has a unique email and can own many notes.
+- A `Note` has a UUID, title, body, author, creation timestamp, and update
+  timestamp.
+- A `Tag` has a unique name.
+- `note_tags` is a composite-primary-key association table connecting notes
+  and tags.
+- Deleting a user cascades to their notes; deleting notes or tags cascades
+  through the association rows.
+
+## Tests
+
+The test suite uses a local SQLite database (`test.db`) and overrides the
+application's production `get_db` dependency. Tests create and drop their
+schema for each test function.
+
+Run the suite with:
+
+```powershell
+pytest
+```
+
+The tests cover:
+
+- Health endpoint behavior.
+- Password hashing and signup.
+- Duplicate-email rejection.
+- Successful, failed, expired, missing, and malformed JWT authentication.
+- Login rate-limit threshold and reset behavior.
+- Transaction rollback when note creation fails after a flush.
+- Stable query counts for note lists with eager-loaded tags.
+
+The SQLite test database is local test state and is ignored by Git. The
+performance measurements documented in
+[`performance/PERFORMANCE.md`](performance/PERFORMANCE.md) use PostgreSQL and
+are separate from the SQLite test configuration.
+
+## Schemathesis contract testing
+
+The hook in
+[`performance/schemathesis_hook.py`](performance/schemathesis_hook.py)
+creates a temporary user, logs in once, and adds the resulting bearer token to
+non-public generated requests. Signup and login are left unauthenticated.
+
+Start the API, then configure the hook and run Schemathesis:
+
+```powershell
+$env:SCHEMATHESIS_HOOKS = "performance/schemathesis_hook.py"
+schemathesis run http://localhost:8000/openapi.json `
+  --checks=not_a_server_error,response_schema_conformance
+```
+
+The hook writes a user to the configured database through the signup endpoint,
+so run it only against an environment where that test data is acceptable.
+
+## Performance notes
+
+The current performance work includes:
+
+- Composite indexes reduced the measured list-query execution time from about
+  4.8 ms to about 0.8 ms on the seeded dataset.
+- `selectinload` removed the tag N+1 pattern, keeping query count constant as
+  the page grows within the tested range.
+- A single-connection pool with no overflow caused a competing request to hit
+  a three-second `QueuePool` checkout timeout while another request held the
+  connection during slow route work.
+- PostgreSQL `READ COMMITTED` prevents dirty reads but permits
+  non-repeatable reads; `REPEATABLE READ` preserves the transaction snapshot.
+
+See [`performance/PERFORMANCE.md`](performance/PERFORMANCE.md) for setup,
+measurements, limitations, and the detailed transaction-isolation discussion.
+
+## Development notes and limitations
+
+- The default CORS allowlist is empty. Add trusted frontend origins in
+  `app/main.py` before browser-based cross-origin use.
+- Rate limiting uses in-memory storage by default. A multi-process or
+  distributed deployment should use shared limiter storage and review the
+  deployment configuration.
+- The database session dependency remains active until the request completes.
+  Avoid long blocking work after database access when connection-pool
+  capacity is constrained.
+- GitHub and Google ID columns exist on the user model, but social login
+  endpoints are not implemented.
+- `generate_csrf_token` exists as a helper, but CSRF protection is not wired
+  into the bearer-token API.
+- Production deployments should use a strong secret, managed configuration,
+  TLS, an appropriately sized connection pool, and explicit error/logging
+  monitoring.
