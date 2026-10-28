@@ -18,7 +18,7 @@ def get_user_by_google_id(db: Session, google_id):
     return db.query(User).filter(User.google_id == str(google_id)).first()
 
 def get_note_by_id(db: Session, note_id: UUID):
-    return db.query(Note).filter(Note.id == str(note_id)).first()
+    return db.query(Note).filter(Note.id == note_id).first()
 
 def get_note_or_404(db:Session, note_id: UUID, user_id: UUID):
     note = get_note_by_id(db, note_id)
